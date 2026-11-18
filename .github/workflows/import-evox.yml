@@ -1,0 +1,49 @@
+name: Import Evolution X coral tree for MistOS 17
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/import-evox.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: true
+      - name: Import tested coral hardware tree and adapt MistOS product
+        shell: bash
+        env:
+          GIT_LFS_SKIP_SMUDGE: '1'
+        run: |
+          set -euo pipefail
+          git config user.name Hecker
+          git config user.email its-hecker@users.noreply.github.com
+          git fetch --depth=1 https://github.com/its-hecker/evox-coral-dt.git main
+          git read-tree --reset -u FETCH_HEAD
+          git checkout HEAD -- .github/workflows/import-evox.yml
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('lineage_coral.mk')
+          s = p.read_text()
+          assert 'EVO_BUILD_TYPE := Unofficial' in s
+          s = s.replace('# Infinity-X Build Flags\n', '# MistOS Android 17 / Pixel 4 XL settings\n')
+          s = s.replace("# 3D face unlock (Pixel Neural Core) replaces Infinity's camera-based FaceUnlock", "# Stock infrared 3D Face HAL, not generic software camera Face Unlock")
+          s = s.replace('EVO_BUILD_TYPE := Unofficial', 'MISTOS_MAINTAINER := "Hecker"\nTARGET_SUPPORTS_GFU := true\nTARGET_ENABLE_FP_OVERRIDE := false\nTARGET_EXCLUDES_AUDIOFX := true')
+          s = s.replace("# GoogleCameraCoral replaces Infinity-X's default Aperture app.", "# Stock GCam replaces Lineage Aperture; MistOS FaceUnlock is suppressed by GFU flag.")
+          s = s.replace('# RisingOS About Phone properties: market name and camera are in product.prop.\n# RisingChipset below generates ro.rising.chipset; do not define it twice.\n', '# MistOS device details are defined in product.prop.\n')
+          s = s.replace('# Stock Google Camera 8.7 for coral, tested and promoted to stable.', '# Stock Google Camera 8.7 and all signed splits for coral.')
+          p.write_text(s)
+          props = Path('product.prop')
+          existing = props.read_text()
+          mist = """\n# MistOS About Phone / Google Pixel 4 XL\nro.mist.device.name=Google Pixel 4 XL\nro.mist.display=1440 x 3040, 90Hz\nro.mist.battery=3700mAh\nro.mist.soc=Qualcomm Snapdragon 855\nro.mist.camera=12.2MP + 16MP\nro.mist.front=8MP\nro.mist.platform=SM8150\nro.mist.screen=6.3-inch P-OLED\n"""
+          if 'ro.mist.device.name=' not in existing:
+              props.write_text(existing.rstrip() + '\n' + mist)
+          Path('MISTOS_PORT.md').write_text("""# MistOS Android 17 — coral\n\nSource: its-hecker/evox-coral-dt main, reworked for MistOS.\n\nProduct is intentionally lineage_coral: upstream mistify creates lineage_<device>.\nThe native 3D IR Face HAL is selected (TARGET_SUPPORTS_GFU=true prevents\nMistOS generic camera-based FaceUnlock from being packaged).\n\nPreserved: Soli Motion Sense / Oslo overlay and plugin allowlist,\nGoogle Camera 8.7 signed splits, Google Face HAL and framework compatibility\npatches, Citadel/Keymaster/camera compatibility blobs, vendor Lunaris Dolby,\nA/B Virtual A/B retrofit, and KernelSU Next kernel integration.\n\nFramework face patch must be applied from the local manifest's build.sh,\nthen verified against the current MistOS frameworks/base source.\nNeither compilation nor boot/hardware support is yet verified on MistOS.\n""")
+          PY
+          git add -A
+          git commit -m "Hecker: import EvoX coral hardware and adapt MistOS 17 product"
+          git push origin HEAD:main
